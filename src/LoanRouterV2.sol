@@ -327,15 +327,22 @@ contract LoanRouterV2 is
      * @notice Burn lender position NFTs and clear reverse lookups
      * @param loanTerms Loan terms
      * @param loanTermsHash_ Loan terms hash
+     * @return lenders Lender addresses
      */
     function _burnLenderPositions(
         LoanTermsV2 calldata loanTerms,
         bytes32 loanTermsHash_
-    ) internal {
+    ) internal returns (address[] memory lenders) {
+        /* Initialize lender addresses */
+        lenders = new address[](loanTerms.trancheSpecs.length);
+
         /* Iterate every tranche and tear down its lender position */
         for (uint8 i; i < loanTerms.trancheSpecs.length; i++) {
             /* Recompute the lender position token ID */
             uint256 tokenId = LoanLogicV2._tokenId(loanTermsHash_, i);
+
+            /* Add lender to list */
+            lenders[i] = _ownerOf(tokenId);
 
             /* Delete reverse loan lookup */
             delete _getLoansStorage().loanReverseLookups[tokenId];
@@ -346,24 +353,26 @@ contract LoanRouterV2 is
     }
 
     /**
-     * @notice Close a fully repaid loan by burning lender positions and returning collateral
+     * @notice Close a loan by marking it repaid, burning lender positions, and returning collateral
      * @param loanTerms Loan terms
      * @param loanTermsHash_ Loan terms hash
-     * @param loan Loan state
      * @param isRefinance Whether the loan is a refinance
+     * @return lenders Lender addresses
      */
     function _closeLoan(
         LoanTermsV2 calldata loanTerms,
         bytes32 loanTermsHash_,
-        LoanState storage loan,
         bool isRefinance
-    ) private {
+    ) private returns (address[] memory lenders) {
+        /* Get loan storage */
+        LoanState storage loan = _getLoansStorage().loans[loanTermsHash_];
+
         /* Mark loan repaid and set balance to zero */
         loan.status = LoanStatus.Repaid;
         loan.balance = 0;
 
         /* Burn lender NFTs and clear reverse lookups */
-        _burnLenderPositions(loanTerms, loanTermsHash_);
+        lenders = _burnLenderPositions(loanTerms, loanTermsHash_);
 
         /* Return collateral to borrower */
         if (!isRefinance) {
@@ -699,7 +708,7 @@ contract LoanRouterV2 is
         }
 
         /* If loan is fully repaid, close it out */
-        if (isFullyRepaid) _closeLoan(loanTerms, loanTermsHash_, loan, false);
+        if (isFullyRepaid) _closeLoan(loanTerms, loanTermsHash_, false);
 
         /* Emit loan repaid event */
         emit LoanRepaid(
@@ -839,18 +848,13 @@ contract LoanRouterV2 is
     ) external onlyRole(ORIGINATOR_ROLE) scaleFactor(oldLoanTerms.currencyToken) nonReentrant {
         /* Get old loan storage */
         bytes32 oldLoanTermsHash = LoanLogicV2.hashLoanTerms(abi.encode(oldLoanTerms));
-        LoanState storage oldLoan = _getLoansStorage().loans[oldLoanTermsHash];
+        LoanState memory oldLoan = _getLoansStorage().loans[oldLoanTermsHash];
 
         /* Validate old loan state */
         if (oldLoan.status != LoanStatus.Active) revert InvalidLoanState();
 
-        /* Cache old loan balance */
-        uint256 oldBalance = oldLoan.balance;
-
-        /* Validate expected current balance */
-        if (expectedBalance != oldBalance) {
-            revert InvalidAmount();
-        }
+        /* Validate expected balance */
+        if (expectedBalance != oldLoan.balance) revert InvalidAmount();
 
         /* Compute new loan terms hash and get new loan storage */
         bytes32 newLoanTermsHash = LoanLogicV2.hashLoanTerms(abi.encode(newLoanTerms));
@@ -859,24 +863,27 @@ contract LoanRouterV2 is
         /* Validate new loan state */
         if (newLoan.status != LoanStatus.Uninitialized) revert InvalidLoanState();
 
-        /* Validate refinance loan terms */
-        LoanLogicV2.validateRefinanceLoanTerms(oldLoanTerms, newLoanTerms, oldLoan, oldLoanTermsHash);
+        /* Validate refinance and the new loan terms */
+        LoanLogicV2.validateRefinanceLoanTerms(oldLoanTerms, newLoanTerms, _getLoansStorage().loans[oldLoanTermsHash]);
 
         /* Read the scale factor */
         uint256 scaleFactor_ = SCALING_FACTOR_STORAGE_LOCATION.asUint256().tload();
 
-        /* Compute the new unscaled balance */
-        uint256 newBalance = LoanLogicV2.computePrincipal(newLoanTerms);
+        /* Compute the new unscaled principal */
+        uint256 newPrincipal = LoanLogicV2.computePrincipal(newLoanTerms);
+
+        /* Carry the old balance into the new loan at the new principal ratio */
+        uint256 newBalance =
+            Math.mulDiv(oldLoan.balance, newPrincipal, LoanLogicV2.computePrincipal(oldLoanTerms), Math.Rounding.Ceil);
 
         /* Close the old loan without returning collateral */
-        _closeLoan(oldLoanTerms, oldLoanTermsHash, oldLoan, true);
+        address[] memory oldLenders = _closeLoan(oldLoanTerms, oldLoanTermsHash, true);
 
         /* Initialize new loan state */
         newLoan.status = LoanStatus.Active;
-        newLoan.balance = oldLoan.repaymentCount == 0 ? _scale(newBalance) : oldBalance;
+        newLoan.balance = newBalance;
         newLoan.repaymentCount = oldLoan.repaymentCount;
-        newLoan.originationTimestamp =
-            oldLoan.repaymentCount == 0 ? uint64(block.timestamp) : oldLoan.originationTimestamp;
+        newLoan.originationTimestamp = oldLoan.originationTimestamp;
 
         /* Tokenize lender positions without calling onLoanOriginated hook */
         _tokenizeLenderPositions(newLoanTerms, newLoanTermsHash, true);
@@ -886,9 +893,8 @@ contract LoanRouterV2 is
             oldLoanTerms,
             newLoanTerms,
             newLoan,
-            oldLoanTermsHash,
-            newLoanTermsHash,
-            oldBalance,
+            oldLenders,
+            oldLoan.balance,
             scaleFactor_,
             _depositTimelock,
             _feeRecipient

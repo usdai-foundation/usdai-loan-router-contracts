@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
+import "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import "./interfaces/ILoanRouterV2.sol";
 import "./interfaces/ILoanRouterV2Hooks.sol";
@@ -81,6 +82,17 @@ library LoanLogicV2 {
         uint256 principal,
         uint256 interest,
         uint256 prepay
+    );
+
+    /**
+     * @notice Emitted when lender is refinance repaid
+     * @param loanTermsHash Loan terms hash
+     * @param lender Lender address
+     * @param trancheIndex Tranche index
+     * @param principal Principal repaid
+     */
+    event LenderRefinanceRepaid(
+        bytes32 indexed loanTermsHash, address indexed lender, uint8 indexed trancheIndex, uint256 principal
     );
 
     /**
@@ -225,14 +237,23 @@ library LoanLogicV2 {
      * @param oldLoanTerms Old loan terms
      * @param newLoanTerms New loan terms
      * @param oldLoan Old loan state
-     * @param oldLoanTermsHash Old loan terms hash
      */
     function validateRefinanceLoanTerms(
         ILoanRouterV2.LoanTermsV2 calldata oldLoanTerms,
         ILoanRouterV2.LoanTermsV2 calldata newLoanTerms,
-        ILoanRouterV2.LoanState storage oldLoan,
-        bytes32 oldLoanTermsHash
+        ILoanRouterV2.LoanState storage oldLoan
     ) external view {
+        /* Compute the old loan terms hash */
+        bytes32 oldLoanTermsHash = _hashLoanTerms(abi.encode(oldLoanTerms));
+
+        /* Read where the old loan sits in its deadline schedule */
+        (bool isCurrentWindowRepaid,) = _repaymentDeadlineStatus(oldLoanTerms, oldLoan, uint64(block.timestamp));
+
+        /* Current window must be repaid */
+        if (!isCurrentWindowRepaid) {
+            revert ILoanRouterV2.InvalidLoanTerms("Current Window Not Repaid");
+        }
+
         /* New loan terms cannot be expired */
         if (newLoanTerms.expiration < block.timestamp) revert ILoanRouterV2.InvalidLoanTerms("Expiration");
 
@@ -257,6 +278,11 @@ library LoanLogicV2 {
             revert ILoanRouterV2.InvalidLoanTerms("Collateral Token IDs");
         }
 
+        /* Repayment schedule must not change */
+        if (keccak256(abi.encode(oldLoanTerms.repaymentSpec)) != keccak256(abi.encode(newLoanTerms.repaymentSpec))) {
+            revert ILoanRouterV2.InvalidLoanTerms("Repayment Spec");
+        }
+
         /* Interest rate model must be set */
         if (newLoanTerms.interestRateSpec.model == address(0)) {
             revert ILoanRouterV2.InvalidLoanTerms("Interest Rate Model");
@@ -265,13 +291,26 @@ library LoanLogicV2 {
         /* Interest rate model options must be valid */
         IInterestRateModelV2(newLoanTerms.interestRateSpec.model).validateOptions(newLoanTerms.interestRateSpec.options);
 
-        /* Validate tranches */
+        /* Tranche count must not increase */
+        if (oldLoanTerms.trancheSpecs.length < newLoanTerms.trancheSpecs.length) {
+            revert ILoanRouterV2.InvalidLoanTerms("Tranche Specs");
+        }
+
+        /* Validate each tranche keeps its lender and carries a valid rate and amount */
         uint256 principal;
-        for (uint8 i; i < newLoanTerms.trancheSpecs.length; i++) {
-            if (newLoanTerms.trancheSpecs[i].rate == 0 || newLoanTerms.trancheSpecs[i].rate > FIXED_POINT_SCALE) {
+        for (uint8 i; i < oldLoanTerms.trancheSpecs.length; i++) {
+            /* Skip tranches that are removed from the new loan terms */
+            if (i >= newLoanTerms.trancheSpecs.length) continue;
+
+            if (IERC721(address(this)).ownerOf(_tokenId(oldLoanTermsHash, i)) != newLoanTerms.trancheSpecs[i].lender) {
+                revert ILoanRouterV2.InvalidLoanTerms("Lender");
+            } else if (newLoanTerms.trancheSpecs[i].rate == 0 || newLoanTerms.trancheSpecs[i].rate > FIXED_POINT_SCALE)
+            {
                 revert ILoanRouterV2.InvalidLoanTerms("Rate");
+            } else if (newLoanTerms.trancheSpecs[i].amount == 0) {
+                revert ILoanRouterV2.InvalidLoanTerms("Tranche Amount");
             }
-            if (newLoanTerms.trancheSpecs[i].amount == 0) revert ILoanRouterV2.InvalidLoanTerms("Tranche Amount");
+
             principal += newLoanTerms.trancheSpecs[i].amount;
         }
 
@@ -329,7 +368,7 @@ library LoanLogicV2 {
      */
     function computePrincipal(
         ILoanRouterV2.LoanTermsV2 calldata loanTerms
-    ) external pure returns (uint256 principal) {
+    ) public pure returns (uint256 principal) {
         for (uint256 i; i < loanTerms.trancheSpecs.length; i++) {
             principal += loanTerms.trancheSpecs[i].amount;
         }
@@ -867,11 +906,11 @@ library LoanLogicV2 {
 
     /**
      * @notice Settle a refinance fee and cash movements and notify lenders
+     * @dev Note that the old tranche index is the index of the old tranche in the old loan terms
      * @param oldLoanTerms Old loan terms
      * @param newLoanTerms New loan terms
      * @param newLoan New loan state
-     * @param oldLoanTermsHash Old loan terms hash
-     * @param newLoanTermsHash New loan terms hash
+     * @param oldLenders Old lenders
      * @param oldBalance Scaled outstanding balance of the old loan and the refinance fee basis
      * @param scaleFactor Scale factor
      * @param depositTimelock Deposit timelock address
@@ -884,38 +923,87 @@ library LoanLogicV2 {
         ILoanRouterV2.LoanTermsV2 calldata oldLoanTerms,
         ILoanRouterV2.LoanTermsV2 calldata newLoanTerms,
         ILoanRouterV2.LoanState storage newLoan,
-        bytes32 oldLoanTermsHash,
-        bytes32 newLoanTermsHash,
+        address[] memory oldLenders,
         uint256 oldBalance,
         uint256 scaleFactor,
         address depositTimelock,
         address feeRecipient
     ) external returns (uint256, uint256, uint256) {
-        /* Calculate cash-out amount from the first tranche */
-        uint256 cashOut = newLoanTerms.trancheSpecs[0].amount - oldLoanTerms.trancheSpecs[0].amount;
+        /* Compute the new and old loan terms hashes */
+        bytes32 newLoanTermsHash = _hashLoanTerms(abi.encode(newLoanTerms));
+        bytes32 oldLoanTermsHash = _hashLoanTerms(abi.encode(oldLoanTerms));
 
-        /* Withdraw the lender's cash-out from the deposit timelock */
+        /* Compute per-tranche cash settlement */
+        (uint256 cashOut, uint256 cashIn, int256[] memory trancheDeltas) =
+            _computeRefinance(oldLoanTerms, newLoanTerms, oldBalance, scaleFactor);
+
+        /* Withdraw cash-out from the deposit timelock into this contract */
         if (cashOut > 0) {
-            IDepositTimelock(depositTimelock)
-                .withdraw(newLoanTerms.trancheSpecs[0].lender, newLoanTermsHash, newLoanTerms.currencyToken, cashOut);
+            _withdrawFundsRefinance(newLoanTerms, newLoanTermsHash, trancheDeltas, depositTimelock);
         }
 
-        /* Calculate cash-out amount for the second tranche from direct transfer by caller */
-        if (oldLoanTerms.trancheSpecs.length == 1 && newLoanTerms.trancheSpecs.length == 2) {
-            cashOut += newLoanTerms.trancheSpecs[1].amount;
+        /* Charge the refinance fee and settle the borrower's net cash */
+        uint256 refinanceFee = _settleBorrowerPayment(
+            newLoanTerms, newLoan, newLoanTermsHash, oldBalance, scaleFactor, feeRecipient, cashOut, cashIn
+        );
+
+        /* Repay cash-in to lenders */
+        if (cashIn > 0) {
+            _repayLendersRefinance(
+                oldLoanTermsHash, oldLenders, trancheDeltas, newLoanTerms.currencyToken, feeRecipient
+            );
         }
 
+        /* Call onLoanRefinanced hook on every tranche lender that supports it */
+        _onLoanRefinancedHook(oldLoanTerms, newLoanTerms, oldLoanTermsHash, newLoanTermsHash, oldLenders, trancheDeltas);
+
+        /* Report a net cash-out or cash-in */
+        if (cashOut > cashIn) {
+            return (cashOut - cashIn, 0, refinanceFee);
+        } else {
+            return (0, cashIn - cashOut, refinanceFee);
+        }
+    }
+
+    /**
+     * @notice Charge the refinance fee and settle the borrower's net cash
+     * @param newLoanTerms New loan terms
+     * @param newLoan New loan state
+     * @param newLoanTermsHash New loan terms hash
+     * @param oldBalance Scaled outstanding balance of the old loan and the refinance fee basis
+     * @param scaleFactor Scale factor
+     * @param feeRecipient Default fee recipient
+     * @param cashOut Gross unscaled cash-out across all tranches
+     * @param cashIn Gross unscaled cash-in across all tranches
+     * @return refinanceFee Unscaled refinance fee
+     */
+    function _settleBorrowerPayment(
+        ILoanRouterV2.LoanTermsV2 calldata newLoanTerms,
+        ILoanRouterV2.LoanState storage newLoan,
+        bytes32 newLoanTermsHash,
+        uint256 oldBalance,
+        uint256 scaleFactor,
+        address feeRecipient,
+        uint256 cashOut,
+        uint256 cashIn
+    ) internal returns (uint256 refinanceFee) {
         /* Compute the scaled refinance fee on the old balance */
         uint256 scaledRefinanceFee = _computeFees(ILoanRouterV2.FeeKind.Refinance, newLoanTerms, newLoan, oldBalance);
 
-        /* Compute unscaled refinance fee */
-        uint256 refinanceFee =
-            (scaledRefinanceFee % scaleFactor == 0
-                ? scaledRefinanceFee / scaleFactor
-                : scaledRefinanceFee / scaleFactor + 1);
+        /* Round the unscaled refinance fee up against scale truncation */
+        refinanceFee = scaledRefinanceFee % scaleFactor == 0
+            ? scaledRefinanceFee / scaleFactor
+            : scaledRefinanceFee / scaleFactor + 1;
 
-        /* Transfer cash-out to the borrower */
-        IERC20(newLoanTerms.currencyToken).safeTransfer(newLoanTerms.borrower, cashOut - refinanceFee);
+        /* Net the borrower against the cash-out so it can cover the cash-in and fee */
+        if (cashOut > cashIn + refinanceFee) {
+            /* Pay the borrower the surplus cash-out */
+            IERC20(newLoanTerms.currencyToken).safeTransfer(newLoanTerms.borrower, cashOut - cashIn - refinanceFee);
+        } else if (cashIn + refinanceFee > cashOut) {
+            /* Pull the borrower's shortfall */
+            IERC20(newLoanTerms.currencyToken)
+                .safeTransferFrom(newLoanTerms.borrower, address(this), cashIn + refinanceFee - cashOut);
+        }
 
         /* Pay the refinance fee */
         _payFees(
@@ -927,19 +1015,154 @@ library LoanLogicV2 {
             feeRecipient,
             oldBalance
         );
+    }
 
-        /* Call onLoanRefinanced hook */
-        ILoanRouterV2Hooks(newLoanTerms.trancheSpecs[0].lender).onLoanRefinanced{gas: HOOK_GAS_LIMIT}(
-            oldLoanTerms,
-            newLoanTerms,
-            oldLoanTermsHash,
-            newLoanTermsHash,
-            0,
-            newLoanTerms.trancheSpecs[0].amount - oldLoanTerms.trancheSpecs[0].amount,
-            0
-        );
+    /**
+     * @notice Call the refinance hook on every tranche lender that supports it
+     * @param oldLoanTerms Old loan terms
+     * @param newLoanTerms New loan terms
+     * @param oldLoanTermsHash Old loan terms hash
+     * @param newLoanTermsHash New loan terms hash
+     * @param oldLenders Old lenders indexed by old tranche index
+     * @param trancheDeltas Per-tranche unscaled cash settlement
+     */
+    function _onLoanRefinancedHook(
+        ILoanRouterV2.LoanTermsV2 calldata oldLoanTerms,
+        ILoanRouterV2.LoanTermsV2 calldata newLoanTerms,
+        bytes32 oldLoanTermsHash,
+        bytes32 newLoanTermsHash,
+        address[] memory oldLenders,
+        int256[] memory trancheDeltas
+    ) internal {
+        /* Notify each old tranche lender */
+        for (uint8 i; i < oldLoanTerms.trancheSpecs.length; i++) {
+            /* Call onLoanRefinanced hook if lender is a contract and implements ILoanRouterV2Hooks interface */
+            if (_supportsHooksInterface(oldLenders[i])) {
+                try ILoanRouterV2Hooks(oldLenders[i]).onLoanRefinanced{gas: HOOK_GAS_LIMIT}(
+                    oldLoanTerms,
+                    newLoanTerms,
+                    oldLoanTermsHash,
+                    newLoanTermsHash,
+                    i,
+                    trancheDeltas[i] > 0 ? uint256(trancheDeltas[i]) : 0,
+                    trancheDeltas[i] < 0 ? uint256(-trancheDeltas[i]) : 0
+                ) {}
+                catch (bytes memory reason) {
+                    /* Emit hook failed event */
+                    emit HookFailed(string(reason));
+                }
+            }
+        }
+    }
 
-        return (cashOut, 0, refinanceFee);
+    /**
+     * @notice Compute per-tranche cash settlement from each tranche's principal change
+     * @param oldLoanTerms Old loan terms
+     * @param newLoanTerms New loan terms
+     * @param oldBalance Scaled outstanding balance of the old loan
+     * @param scaleFactor Scale factor
+     * @return cashOut Gross unscaled cash-out summed across all cash-out tranches
+     * @return cashIn Gross unscaled cash-in summed across all cash-in tranches
+     * @return trancheDeltas Per-tranche unscaled cash settlement, positive for
+     * cash-out and negative for cash-in
+     */
+    function _computeRefinance(
+        ILoanRouterV2.LoanTermsV2 calldata oldLoanTerms,
+        ILoanRouterV2.LoanTermsV2 calldata newLoanTerms,
+        uint256 oldBalance,
+        uint256 scaleFactor
+    ) internal pure returns (uint256 cashOut, uint256 cashIn, int256[] memory trancheDeltas) {
+        /* Compute scaled old principal */
+        uint256 scaledOldPrincipal = computePrincipal(oldLoanTerms) * scaleFactor;
+
+        /* Allocate the per-tranche delta array */
+        trancheDeltas = new int256[](oldLoanTerms.trancheSpecs.length);
+
+        /* Settle each tranche against the change in its principal */
+        for (uint8 i; i < oldLoanTerms.trancheSpecs.length; i++) {
+            /* Read the old and new tranche principals */
+            uint256 oldAmount = oldLoanTerms.trancheSpecs[i].amount;
+            uint256 newAmount = i >= newLoanTerms.trancheSpecs.length ? 0 : newLoanTerms.trancheSpecs[i].amount;
+
+            /* Draw cash-out for a larger tranche or repay cash-in for a smaller one */
+            if (newAmount > oldAmount) {
+                /* Cash-out rounds down against the borrower */
+                uint256 amount = Math.mulDiv(newAmount - oldAmount, oldBalance, scaledOldPrincipal);
+
+                /* Record the cash-out delta */
+                trancheDeltas[i] = SafeCast.toInt256(amount);
+
+                /* Accumulate the total cash-out */
+                cashOut += amount;
+            } else if (newAmount < oldAmount) {
+                /* Cash-in rounds up against the borrower */
+                uint256 amount = Math.mulDiv(oldAmount - newAmount, oldBalance, scaledOldPrincipal, Math.Rounding.Ceil);
+
+                /* Record the cash-in delta */
+                trancheDeltas[i] = -SafeCast.toInt256(amount);
+
+                /* Accumulate the total cash-in */
+                cashIn += amount;
+            }
+        }
+    }
+
+    /**
+     * @notice Withdraw cash-out refinance tranche funds from the deposit timelock into this contract
+     * @param newLoanTerms New loan terms
+     * @param newLoanTermsHash New loan terms hash
+     * @param trancheDeltas Per-tranche unscaled cash settlement
+     * @param depositTimelock Deposit timelock address
+     */
+    function _withdrawFundsRefinance(
+        ILoanRouterV2.LoanTermsV2 calldata newLoanTerms,
+        bytes32 newLoanTermsHash,
+        int256[] memory trancheDeltas,
+        address depositTimelock
+    ) internal {
+        /* Withdraw each cash-out tranche's funds */
+        for (uint8 i; i < trancheDeltas.length; i++) {
+            /* Skip tranches that are not cash-out */
+            if (trancheDeltas[i] <= 0) continue;
+
+            /* Withdraw the lender's cash-out from the deposit timelock */
+            IDepositTimelock(depositTimelock)
+                .withdraw(
+                    newLoanTerms.trancheSpecs[i].lender,
+                    newLoanTermsHash,
+                    newLoanTerms.currencyToken,
+                    uint256(trancheDeltas[i])
+                );
+        }
+    }
+
+    /**
+     * @notice Repay cash-in tranches to lenders from this contract
+     * @dev Note that new lenders are already validated to be owners of old tranche positions
+     * @param oldLoanTermsHash Old loan terms hash
+     * @param oldLenders Old lenders
+     * @param trancheDeltas Per-tranche unscaled cash settlement
+     * @param currencyToken Currency token
+     * @param feeRecipient Fallback recipient for rejected transfers
+     */
+    function _repayLendersRefinance(
+        bytes32 oldLoanTermsHash,
+        address[] memory oldLenders,
+        int256[] memory trancheDeltas,
+        address currencyToken,
+        address feeRecipient
+    ) internal {
+        /* Repay each cash-in tranche's lender */
+        for (uint8 i; i < trancheDeltas.length; i++) {
+            /* Skip tranches that are not cash-in */
+            if (trancheDeltas[i] >= 0) continue;
+
+            /* Repay the lender their cash-in, falling back to the fee recipient */
+            _transferOrRedirect(IERC20(currencyToken), oldLenders[i], uint256(-trancheDeltas[i]), feeRecipient);
+
+            /* Emit lender refinance repaid event */
+            emit LenderRefinanceRepaid(oldLoanTermsHash, oldLenders[i], i, uint256(-trancheDeltas[i]));
+        }
     }
 
     /*------------------------------------------------------------------------*/

@@ -88,7 +88,7 @@ interface ILoanRouterV2Hooks {
      * @param newLoanTerms New loan terms
      * @param oldLoanTermsHash Old loan terms hash
      * @param newLoanTermsHash New loan terms hash
-     * @param trancheIndex Tranche index
+     * @param trancheIndex Old tranche index
      * @param cashOut Cash out amount
      * @param cashIn Cash in amount
      */
