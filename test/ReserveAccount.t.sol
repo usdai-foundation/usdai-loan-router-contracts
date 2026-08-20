@@ -301,6 +301,42 @@ contract ReserveAccountTest is BaseTest {
         originationTs;
     }
 
+    /*------------------------------------------------------------------------*/
+    /* Test: repay - an overdue loan is cured and closed in one transaction */
+    /*------------------------------------------------------------------------*/
+
+    function test__Repay_Overdue_MulticallCureAndClose() public {
+        ILoanRouterV2.LoanTermsV2 memory loanTerms = _originateLoan();
+        bytes32 loanTermsHash_ = router.loanTermsHash(loanTerms);
+
+        /* Warp five days past the third deadline, leaving three missed deadlines */
+        (,, uint64 originationTs,) = router.loanState(loanTermsHash_);
+        uint64[] memory schedule = _scheduleAt(loanTerms, originationTs);
+        vm.warp(schedule[2] + 5 days);
+
+        /* Fund the reserve with room for a full payoff on every call */
+        deal(USDAI, address(reserve), RESERVES_REQUIRED + 4 * TRANCHE_AMOUNT);
+
+        /* Batch a repayment per overdue window plus one for the current window */
+        bytes[] memory calls = new bytes[](4);
+        for (uint256 i; i < calls.length; i++) {
+            calls[i] = abi.encodeWithSelector(IReserveAccount.repay.selector, loanTerms, TRANCHE_AMOUNT);
+        }
+
+        /* Cure the loan and close it in one transaction */
+        vm.prank(users.borrower);
+        reserve.multicall(calls);
+
+        /* Loan is closed with every overdue window priced */
+        (ILoanRouterV2.LoanStatus status, uint16 repaymentCount,, uint256 balance) = router.loanState(loanTermsHash_);
+        assertEq(uint8(status), uint8(ILoanRouterV2.LoanStatus.Repaid));
+        assertEq(repaymentCount, 4);
+        assertEq(balance, 0);
+
+        /* Collateral came back to the reserve account */
+        assertEq(collateralNft.ownerOf(loanTerms.collateralTokenIds[0]), address(reserve));
+    }
+
     function test__Repay_RevertWhen_BelowScheduledMinimum() public {
         /* The reserve no longer enforces a minimum payment, so a sub-minimum amount must be rejected by the
          * router. Confirm the minimum is still enforced even with ample surplus available. */

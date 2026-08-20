@@ -393,8 +393,12 @@ library LoanLogicV2 {
         uint256 scaledAmount,
         uint256 scaledPrincipal
     ) external view returns (Repayment memory repayment) {
+        /* Read where this payment sits in the deadline schedule */
+        (bool isCurrentWindowRepaid, bool isCurrentWindowOverdue) =
+            _repaymentDeadlineStatus(loanTerms, loan, uint64(block.timestamp));
+
         /* Treat the payment as a prepayment when the current window is already repaid */
-        if (_isCurrentWindowRepaid(loanTerms, loan, uint64(block.timestamp))) {
+        if (isCurrentWindowRepaid) {
             return _computePrepayment(loanTerms, loan, scaleFactor, scaledAmount, scaledPrincipal);
         }
 
@@ -412,8 +416,8 @@ library LoanLogicV2 {
         /* Validate base repayment amount (principal + interest + repayment fees) */
         uint256 requiredBase = repayment.principalPayment + repayment.interestPayment + repayment.repaymentFee;
 
-        /* Calculate prepayment from excess, capped at remaining balance after principal */
-        repayment.prepayment = scaledAmount > requiredBase
+        /* Calculate prepayment from excess, which an overdue loan cannot take until it is current */
+        repayment.prepayment = !isCurrentWindowOverdue && scaledAmount > requiredBase
             ? Math.min(loan.balance - repayment.principalPayment, scaledAmount - requiredBase)
             : 0;
 
@@ -469,22 +473,26 @@ library LoanLogicV2 {
     }
 
     /**
-     * @notice Check whether the installment for the current schedule window is already paid
+     * @notice Check where a payment made at a timestamp sits in the deadline schedule
      * @param loanTerms Loan terms
      * @param loan Loan state
-     * @param timestamp Timestamp to evaluate the window against
-     * @return True when the repayment count runs ahead of the current window
+     * @param timestamp Timestamp to evaluate the schedule against
+     * @return isCurrentWindowRepaid True when the repayment count runs ahead of the current window
+     * @return isCurrentWindowOverdue True when the current window's deadline has already passed
      */
-    function _isCurrentWindowRepaid(
+    function _repaymentDeadlineStatus(
         ILoanRouterV2.LoanTermsV2 calldata loanTerms,
         ILoanRouterV2.LoanState storage loan,
         uint64 timestamp
-    ) internal view returns (bool) {
+    ) internal view returns (bool isCurrentWindowRepaid, bool isCurrentWindowOverdue) {
         /* Compute the schedule deadlines */
         (, uint64[] memory loanDeadlines) = ScheduleLogic.deadlines(loanTerms, loan.originationTimestamp);
 
         /* Current window is repaid when the last paid installment's deadline has not passed */
-        return loan.repaymentCount > 0 && loanDeadlines[loan.repaymentCount - 1] >= timestamp;
+        isCurrentWindowRepaid = loan.repaymentCount > 0 && loanDeadlines[loan.repaymentCount - 1] >= timestamp;
+
+        /* Current window is overdue once its own deadline has passed */
+        isCurrentWindowOverdue = loanDeadlines[loan.repaymentCount] < timestamp;
     }
 
     /**
@@ -591,8 +599,11 @@ library LoanLogicV2 {
         /* If loan is not active */
         if (loan.status != ILoanRouterV2.LoanStatus.Active) return (0, 0, 0);
 
+        /* Read the schedule position of a payment at this timestamp */
+        (bool isCurrentWindowRepaid,) = _repaymentDeadlineStatus(loanTerms, loan, timestamp);
+
         /* No scheduled payment is due when the current window is already repaid */
-        if (_isCurrentWindowRepaid(loanTerms, loan, timestamp)) return (0, 0, 0);
+        if (isCurrentWindowRepaid) return (0, 0, 0);
 
         /* Calculate repayment due */
         (uint256 scaledPrincipalPayment, uint256 scaledInterestPayment,,) =
