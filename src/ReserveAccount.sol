@@ -257,13 +257,13 @@ contract ReserveAccount is
         token.forceApprove(_loanRouter, amount);
 
         /* Forward repayment to loan router */
-        ILoanRouterV2(_loanRouter).repay(loanTerms, amount);
+        uint256 repaymentAmount = ILoanRouterV2(_loanRouter).repay(loanTerms, amount);
 
         /* Revoke loan router approval */
         token.forceApprove(_loanRouter, 0);
 
         /* Emit RepaymentForwarded event */
-        emit RepaymentForwarded(amount);
+        emit RepaymentForwarded(repaymentAmount);
     }
 
     /**
