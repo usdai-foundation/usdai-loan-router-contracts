@@ -495,11 +495,12 @@ interface ILoanRouterV2 {
      * @notice Repay a loan, or prepay principal when the current window is already paid
      * @param loanTerms Loan terms
      * @param amount Amount to pay
+     * @return repaymentAmount Amount repaid
      */
     function repay(
         LoanTermsV2 calldata loanTerms,
         uint256 amount
-    ) external;
+    ) external returns (uint256 repaymentAmount);
 
     /*------------------------------------------------------------------------*/
     /* Liquidator API */

@@ -619,7 +619,7 @@ contract LoanRouterV2 is
     function repay(
         LoanTermsV2 calldata loanTerms,
         uint256 amount
-    ) external whenNotPaused scaleFactor(loanTerms.currencyToken) nonReentrant {
+    ) external whenNotPaused scaleFactor(loanTerms.currencyToken) nonReentrant returns (uint256 repaymentAmount) {
         /* Get loan storage */
         bytes32 loanTermsHash_ = LoanLogicV2.hashLoanTerms(abi.encode(loanTerms));
         LoanState storage loan = _getLoansStorage().loans[loanTermsHash_];
@@ -644,8 +644,11 @@ contract LoanRouterV2 is
         /* Validate the scaled amount covers the total payment */
         if (scaledAmount < repayment.repayment) revert InvalidAmount();
 
-        /* Transfer total payment amount from borrower (rounded up against scale truncation) */
-        IERC20(loanTerms.currencyToken).safeTransferFrom(msg.sender, address(this), _unscale(repayment.repayment, true));
+        /* Unscale the total payment amount, rounded up against scale truncation */
+        repaymentAmount = _unscale(repayment.repayment, true);
+
+        /* Transfer total payment amount from borrower */
+        IERC20(loanTerms.currencyToken).safeTransferFrom(msg.sender, address(this), repaymentAmount);
 
         /* Pay repayment fees on a scheduled repayment */
         if (repayment.repaymentFee > 0) {
