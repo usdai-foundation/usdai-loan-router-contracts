@@ -14,6 +14,7 @@ contract Show is Deployer {
         _deserialize();
 
         console.log("loanRouterV2:                  %s", _deployment.loanRouterV2);
+        console.log("loanScheduleViewer:            %s", _deployment.loanScheduleViewer);
         console.log("collateralTimelock:            %s", _deployment.collateralTimelock);
         console.log("depositTimelock:               %s", _deployment.depositTimelock);
         console.log("escrowTimelock:                %s", _deployment.escrowTimelock);

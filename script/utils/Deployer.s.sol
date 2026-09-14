@@ -23,6 +23,7 @@ contract Deployer is BaseScript {
 
     struct Deployment {
         address loanRouterV2;
+        address loanScheduleViewer;
         address depositTimelock;
         address escrowTimelock;
         address collateralTimelock;
@@ -107,6 +108,7 @@ contract Deployer is BaseScript {
         string memory json = "";
 
         json = stdJson.serialize("", "loanRouterV2", _deployment.loanRouterV2);
+        json = stdJson.serialize("", "loanScheduleViewer", _deployment.loanScheduleViewer);
         json = stdJson.serialize("", "depositTimelock", _deployment.depositTimelock);
         json = stdJson.serialize("", "escrowTimelock", _deployment.escrowTimelock);
         json = stdJson.serialize("", "collateralTimelock", _deployment.collateralTimelock);
@@ -134,6 +136,13 @@ contract Deployer is BaseScript {
             _deployment.loanRouterV2 = instance;
         } catch {
             console.log("Could not parse loanRouterV2");
+        }
+
+        /* Deserialize loanScheduleViewer */
+        try vm.parseJsonAddress(json, ".loanScheduleViewer") returns (address instance) {
+            _deployment.loanScheduleViewer = instance;
+        } catch {
+            console.log("Could not parse loanScheduleViewer");
         }
 
         /* Deserialize depositTimelock */
