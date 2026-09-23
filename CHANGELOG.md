@@ -1,3 +1,6 @@
+* ReserveAccount v1.1 - 09/23/2026
+    * Use actual repayment amount in `RepaymentForwarded` event.
+
 * LoanRouter v1.3 - 09/23/2026
     * Fix prepayment calculation for overdue loans.
     * Add repayment amount return to `repay()` API.
