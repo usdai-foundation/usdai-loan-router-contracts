@@ -1,3 +1,6 @@
+* LoanScheduleViewer v1.0 - 09/23/2026
+    * Initial release.
+
 * ReserveAccount v1.1 - 09/23/2026
     * Use actual repayment amount in `RepaymentForwarded` event.
 
