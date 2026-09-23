@@ -512,20 +512,8 @@ contract LoanRouterV2 is
         LoanTermsV2 calldata loanTerms,
         uint64 timestamp
     ) public view returns (uint256, uint256, uint256) {
-        /* Get scale factor */
-        uint256 scaleFactor_ = 10 ** (18 - IERC20Metadata(loanTerms.currencyToken).decimals());
-
-        (uint256 scaledPrincipalPayment, uint256 scaledInterestPayment, uint256 scaledFee) = LoanLogicV2.quoteRepayment(
-            loanTerms,
-            _getLoansStorage().loans[LoanLogicV2.hashLoanTerms(abi.encode(loanTerms))],
-            timestamp,
-            _scale(LoanLogicV2.computePrincipal(loanTerms), scaleFactor_)
-        );
-
-        return (
-            _unscale(scaledPrincipalPayment, scaleFactor_, true),
-            _unscale(scaledInterestPayment, scaleFactor_, true),
-            _unscale(scaledFee, scaleFactor_, true)
+        return LoanLogicV2.quote(
+            loanTerms, _getLoansStorage().loans[LoanLogicV2.hashLoanTerms(abi.encode(loanTerms))], timestamp
         );
     }
 

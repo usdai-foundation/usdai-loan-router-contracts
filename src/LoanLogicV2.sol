@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
@@ -628,16 +629,14 @@ library LoanLogicV2 {
      * @param loanTerms Loan terms
      * @param loan Loan state
      * @param timestamp Timestamp
-     * @param scaledPrincipal Scaled principal
-     * @return scaledPrincipalPayment Scaled principal payment
-     * @return scaledInterestPayment Scaled interest payment
-     * @return scaledFee Scaled fee total
+     * @return principalPayment Unscaled principal payment
+     * @return interestPayment Unscaled interest payment
+     * @return feePayment Unscaled total fee payment
      */
-    function quoteRepayment(
+    function quote(
         ILoanRouterV2.LoanTermsV2 calldata loanTerms,
         ILoanRouterV2.LoanState storage loan,
-        uint64 timestamp,
-        uint256 scaledPrincipal
+        uint64 timestamp
     ) external view returns (uint256, uint256, uint256) {
         /* If loan is not active */
         if (loan.status != ILoanRouterV2.LoanStatus.Active) return (0, 0, 0);
@@ -647,6 +646,10 @@ library LoanLogicV2 {
 
         /* No scheduled payment is due when the current window is already repaid */
         if (isCurrentWindowRepaid) return (0, 0, 0);
+
+        /* Get scale factor and compute scaled principal */
+        uint256 scaleFactor = 10 ** (18 - IERC20Metadata(loanTerms.currencyToken).decimals());
+        uint256 scaledPrincipal = computePrincipal(loanTerms) * scaleFactor;
 
         /* Calculate repayment due */
         (uint256 scaledPrincipalPayment, uint256 scaledInterestPayment,,) =
@@ -658,7 +661,12 @@ library LoanLogicV2 {
             scaledFee += _computeFees(ILoanRouterV2.FeeKind.Exit, loanTerms, loan, scaledPrincipal);
         }
 
-        return (scaledPrincipalPayment, scaledInterestPayment, scaledFee);
+        /* Unscale amounts, rounding up */
+        return (
+            Math.ceilDiv(scaledPrincipalPayment, scaleFactor),
+            Math.ceilDiv(scaledInterestPayment, scaleFactor),
+            Math.ceilDiv(scaledFee, scaleFactor)
+        );
     }
 
     /*------------------------------------------------------------------------*/
