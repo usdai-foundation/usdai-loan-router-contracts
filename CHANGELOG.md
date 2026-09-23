@@ -1,3 +1,9 @@
+* LoanRouter v1.3 - 09/23/2026
+    * Fix prepayment calculation for overdue loans.
+    * Add repayment amount return to `repay()` API.
+    * Add support for cash-in and multi-tranche to `refinance()` API.
+    * Add support for legacy pre-EscrowTimelock loans to `refinance()` API.
+
 * LoanRouter v1.2 - 07/28/2026
     * Add cash-out support to `refinance()` API.
     * Add encoded loan terms to `LoanOriginated` event.
