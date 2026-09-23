@@ -199,12 +199,12 @@ contract LoanRouterV2 is
         address currencyToken_
     ) {
         /* Store scale factor in transient storage location */
-        SCALING_FACTOR_STORAGE_LOCATION.asUint256().tstore(10 ** (18 - IERC20Metadata(currencyToken_).decimals()));
+        _storeScaleFactor(currencyToken_);
 
         _;
 
         /* Reset scale factor */
-        SCALING_FACTOR_STORAGE_LOCATION.asUint256().tstore(0);
+        _storeScaleFactor(address(0));
     }
 
     /*------------------------------------------------------------------------*/
@@ -224,6 +224,17 @@ contract LoanRouterV2 is
     /*------------------------------------------------------------------------*/
     /* Internal helpers */
     /*------------------------------------------------------------------------*/
+
+    /**
+     * @notice Store scale factor in transient storage
+     * @param currencyToken_ Currency token
+     */
+    function _storeScaleFactor(
+        address currencyToken_
+    ) private {
+        SCALING_FACTOR_STORAGE_LOCATION.asUint256()
+            .tstore(currencyToken_ == address(0) ? 0 : 10 ** (18 - IERC20Metadata(currencyToken_).decimals()));
+    }
 
     /**
      * @notice Scale a value up
