@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity 0.8.35;
 
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 
+import "../interfaces/IFeeModel.sol";
 import "../interfaces/IInterestRateModelV2.sol";
 import "../interfaces/ILoanRouterV2.sol";
 
@@ -75,7 +77,7 @@ contract AmortizedInterestRateModel is IInterestRateModelV2 {
     /**
      * @notice Compute the level total payment that amortizes the balance over the remaining windows
      * @param state Loan state
-     * @param blendedRate Blended per-second interest rate (1e18-scaled)
+     * @param blendedRate Blended per-second interest and fee rate (1e18-scaled)
      * @param deadlines Full deadline schedule
      * @return Level total repayment per window, 1e18-scaled
      */
@@ -210,10 +212,34 @@ contract AmortizedInterestRateModel is IInterestRateModelV2 {
             /* Last payment sweeps the remaining balance */
             scaledPrincipalPayment = state.balance;
         } else {
-            /* Principal is the level payment less this window's interest */
-            uint256 levelPayment = _computeLevelPayment(state, blendedRate, deadlines);
-            scaledPrincipalPayment = levelPayment > scaledInterestPayment ? levelPayment - scaledInterestPayment : 0;
-            scaledPrincipalPayment = Math.min(scaledPrincipalPayment, state.balance);
+            /* Calculate scaled principal */
+            uint256 scaledPrincipal = principal * 10 ** (18 - IERC20Metadata(terms.currencyToken).decimals());
+
+            /* Sum repayment fees charged on this window */
+            uint256 scaledRepaymentFees;
+            for (uint256 i; i < terms.feeSpecs.length; i++) {
+                if (terms.feeSpecs[i].kind != ILoanRouterV2.FeeKind.Repayment) continue;
+
+                scaledRepaymentFees += IFeeModel(terms.feeSpecs[i].model)
+                    .fee(terms, state, terms.feeSpecs[i].options, scaledPrincipal);
+            }
+
+            /* Calculate repayment fees as a per-second rate on the balance, so
+            the level payment covers them in every window */
+            uint256 feeRate = (state.balance != 0)
+                ? Math.mulDiv(scaledRepaymentFees, FIXED_POINT_SCALE, state.balance * windowDuration)
+                : 0;
+
+            /* Compute level payment that covers all components (interest, fees, and principal) */
+            uint256 levelPayment = _computeLevelPayment(state, blendedRate + feeRate, deadlines);
+
+            /* Principal is whatever the level payment leaves after interest and fees */
+            scaledPrincipalPayment = Math.min(
+                (levelPayment > scaledInterestPayment + scaledRepaymentFees)
+                    ? (levelPayment - scaledInterestPayment - scaledRepaymentFees)
+                    : 0,
+                state.balance
+            );
         }
 
         /* Compute grace period interest, if past the current window's deadline */
