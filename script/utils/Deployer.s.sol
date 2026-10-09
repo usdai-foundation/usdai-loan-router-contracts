@@ -31,6 +31,7 @@ contract Deployer is BaseScript {
         address amortizedInterestRateModel;
         address absoluteFeeModel;
         address ratioFeeModel;
+        address proratedRatioFeeModel;
         address reserveAccountBeacon;
         address reserveAccountFactory;
     }
@@ -116,6 +117,7 @@ contract Deployer is BaseScript {
         json = stdJson.serialize("", "amortizedInterestRateModel", _deployment.amortizedInterestRateModel);
         json = stdJson.serialize("", "absoluteFeeModel", _deployment.absoluteFeeModel);
         json = stdJson.serialize("", "ratioFeeModel", _deployment.ratioFeeModel);
+        json = stdJson.serialize("", "proratedRatioFeeModel", _deployment.proratedRatioFeeModel);
         json = stdJson.serialize("", "reserveAccountBeacon", _deployment.reserveAccountBeacon);
         json = stdJson.serialize("", "reserveAccountFactory", _deployment.reserveAccountFactory);
 
@@ -192,6 +194,13 @@ contract Deployer is BaseScript {
             _deployment.ratioFeeModel = instance;
         } catch {
             console.log("Could not parse ratioFeeModel");
+        }
+
+        /* Deserialize proratedRatioFeeModel */
+        try vm.parseJsonAddress(json, ".proratedRatioFeeModel") returns (address instance) {
+            _deployment.proratedRatioFeeModel = instance;
+        } catch {
+            console.log("Could not parse proratedRatioFeeModel");
         }
 
         /* Deserialize reserveAccountBeacon */
