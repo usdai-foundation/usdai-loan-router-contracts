@@ -33,9 +33,9 @@ library LoanLogicV2 {
     /*------------------------------------------------------------------------*/
 
     /**
-     * @notice Fixed point scale
+     * @notice Max per-second tranche interest rate (1e18-scaled), 100% APR over a 365 day year
      */
-    uint256 internal constant FIXED_POINT_SCALE = 1e18;
+    uint256 internal constant MAX_INTEREST_RATE = 31_709_791_983;
 
     /**
      * @notice Hook gas limit (may receive less due to EIP-150)
@@ -205,7 +205,7 @@ library LoanLogicV2 {
         if (loanTerms.trancheSpecs.length > 32) revert ILoanRouterV2.InvalidLoanTerms("Tranche Specs");
         uint256 principal;
         for (uint256 i; i < loanTerms.trancheSpecs.length; i++) {
-            if (loanTerms.trancheSpecs[i].rate == 0 || loanTerms.trancheSpecs[i].rate > FIXED_POINT_SCALE) {
+            if (loanTerms.trancheSpecs[i].rate == 0 || loanTerms.trancheSpecs[i].rate > MAX_INTEREST_RATE) {
                 revert ILoanRouterV2.InvalidLoanTerms("Rate");
             }
             if (loanTerms.trancheSpecs[i].lender == address(0)) revert ILoanRouterV2.InvalidLoanTerms("Lender");
@@ -309,7 +309,7 @@ library LoanLogicV2 {
 
             if (IERC721(address(this)).ownerOf(_tokenId(oldLoanTermsHash, i)) != newLoanTerms.trancheSpecs[i].lender) {
                 revert ILoanRouterV2.InvalidLoanTerms("Lender");
-            } else if (newLoanTerms.trancheSpecs[i].rate == 0 || newLoanTerms.trancheSpecs[i].rate > FIXED_POINT_SCALE)
+            } else if (newLoanTerms.trancheSpecs[i].rate == 0 || newLoanTerms.trancheSpecs[i].rate > MAX_INTEREST_RATE)
             {
                 revert ILoanRouterV2.InvalidLoanTerms("Rate");
             } else if (newLoanTerms.trancheSpecs[i].amount == 0) {

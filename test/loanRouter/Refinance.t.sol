@@ -1041,16 +1041,16 @@ contract LoanRouterV2RefinanceTest is RouterFixture {
     }
 
     /**
-     * @notice A tranche rate above the fixed point scale is rejected
+     * @notice A tranche rate above the maximum is rejected
      */
-    function test__RevertWhen_RateAboveScale() public {
+    function test__RevertWhen_RateAboveMaximum() public {
         /* Read the outstanding balance without repaying */
         uint256 balance = _readBalance(loanA);
 
         ILoanRouterV2.LoanTermsV2 memory newTerms = _buildNewTerms(loanA, RATE_10_PCT, balance, REFINANCE_FEE);
 
-        /* Push the tranche rate above the fixed point scale */
-        newTerms.trancheSpecs[0].rate = FIXED_POINT_SCALE + 1;
+        /* Push the tranche rate above the maximum */
+        newTerms.trancheSpecs[0].rate = MAX_INTEREST_RATE + 1;
 
         /* The router rejects the out of range rate */
         vm.prank(users.deployer);

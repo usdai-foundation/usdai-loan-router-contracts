@@ -222,7 +222,7 @@ contract EscrowTimelockDepositTest is BaseTest {
 
         vm.startPrank(STAKED_USDAI);
         vm.expectRevert(IEscrowTimelock.InvalidAmount.selector);
-        escrowTimelock.deposit(target, context, USDAI, amount, MAX_ESCROW_INTEREST_RATE + 1);
+        escrowTimelock.deposit(target, context, USDAI, amount, MAX_INTEREST_RATE + 1);
         vm.stopPrank();
     }
 
@@ -232,11 +232,11 @@ contract EscrowTimelockDepositTest is BaseTest {
         uint256 amount = 100_000 * 1e18;
 
         vm.prank(STAKED_USDAI);
-        escrowTimelock.deposit(target, context, USDAI, amount, MAX_ESCROW_INTEREST_RATE);
+        escrowTimelock.deposit(target, context, USDAI, amount, MAX_INTEREST_RATE);
 
         uint256 tokenId = escrowTimelock.depositTokenId(target, context);
         (,,, uint256 rate_,,) = escrowTimelock.depositInfo(tokenId);
-        assertEq(rate_, MAX_ESCROW_INTEREST_RATE, "Rate should be exactly the maximum");
+        assertEq(rate_, MAX_INTEREST_RATE, "Rate should be exactly the maximum");
         assertEq(escrowTimelock.accrued(), 0, "Accrued is 0 at the deposit instant");
     }
 

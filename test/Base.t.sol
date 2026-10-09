@@ -41,9 +41,11 @@ abstract contract BaseTest is Test {
     /* Fixed point scale */
     uint256 internal constant FIXED_POINT_SCALE = 1e18;
 
-
     /* Maximum per-second escrow timelock rate, 100% APR over a 365 day year */
     uint256 internal constant MAX_ESCROW_INTEREST_RATE = 31_709_791_983;
+
+    /* Maximum per-second interest rate, 100% APR over a 365 day year */
+    uint256 internal constant MAX_INTEREST_RATE = 31_709_791_983;
 
     /*------------------------------------------------------------------------*/
     /* User accounts */
