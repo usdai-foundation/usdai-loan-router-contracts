@@ -126,7 +126,7 @@ contract AmortizedInterestRateModel is IInterestRateModelV2 {
      * @inheritdoc IInterestRateModelV2
      */
     function INTEREST_RATE_MODEL_VERSION() external pure returns (string memory) {
-        return "2.0";
+        return "2.1";
     }
 
     /**
