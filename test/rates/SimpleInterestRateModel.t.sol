@@ -570,6 +570,15 @@ contract SimpleInterestRateModelTest is BaseTest {
         model.validateOptions("");
     }
 
+    function test__ValidateOptions_AcceptsGracePeriodRateAtMaximum() public view {
+        model.validateOptions(_gracedOpts(3 days, MAX_INTEREST_RATE));
+    }
+
+    function test__ValidateOptions_RevertWhen_GracePeriodRateAboveMaximum() public {
+        vm.expectRevert(SimpleInterestRateModel.InvalidOptions.selector);
+        model.validateOptions(_gracedOpts(3 days, MAX_INTEREST_RATE + 1));
+    }
+
     /*------------------------------------------------------------------------*/
     /* Test: fuzz */
     /*------------------------------------------------------------------------*/

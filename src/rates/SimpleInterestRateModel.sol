@@ -14,6 +14,15 @@ import "../ScheduleLogic.sol";
  */
 contract SimpleInterestRateModel is IInterestRateModelV2 {
     /*------------------------------------------------------------------------*/
+    /* Errors */
+    /*------------------------------------------------------------------------*/
+
+    /**
+     * @notice Invalid options
+     */
+    error InvalidOptions();
+
+    /*------------------------------------------------------------------------*/
     /* Constants */
     /*------------------------------------------------------------------------*/
 
@@ -21,6 +30,11 @@ contract SimpleInterestRateModel is IInterestRateModelV2 {
      * @notice Fixed point scale
      */
     uint256 internal constant FIXED_POINT_SCALE = 1e18;
+
+    /**
+     * @notice Max per-second grace period interest rate (1e18-scaled), 100% APR over a 365 day year
+     */
+    uint256 internal constant MAX_GRACE_PERIOD_RATE = 31_709_791_983;
 
     /*------------------------------------------------------------------------*/
     /* Structures */
@@ -83,7 +97,10 @@ contract SimpleInterestRateModel is IInterestRateModelV2 {
         bytes calldata data
     ) external pure {
         /* Reverts if the data is not a valid Options struct */
-        abi.decode(data, (Options));
+        Options memory options = abi.decode(data, (Options));
+
+        /* Validate grace period rate is not more than max grace period rate */
+        if (options.gracePeriodRate > MAX_GRACE_PERIOD_RATE) revert InvalidOptions();
     }
 
     /**
