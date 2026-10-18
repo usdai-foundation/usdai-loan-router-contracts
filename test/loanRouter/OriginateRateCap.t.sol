@@ -44,6 +44,45 @@ contract LoanRouterV2OriginateRateCapTest is RouterFixture {
     }
 
     /*------------------------------------------------------------------------*/
+    /* Test: grace period rate above the maximum */
+    /*------------------------------------------------------------------------*/
+
+    /**
+     * @notice A grace period rate above the maximum is rejected at origination
+     */
+    function test__Originate_RevertWhen_GracePeriodRateAboveMaximum() public {
+        /* Build the default loan terms */
+        RouterFixture.LoanConfig memory config = _defaultConfig();
+
+        ILoanRouterV2.LoanTermsV2 memory loanTerms = buildLoanTerms(config);
+
+        /* Use the amortized interest rate model */
+        loanTerms.interestRateSpec.model = address(new AmortizedInterestRateModel());
+
+        /* Push the grace period rate above the maximum */
+        loanTerms.interestRateSpec.options = abi.encode(
+            AmortizedInterestRateModel.Options({
+                principalAndInterestStubPayment: false,
+                gracePeriodDuration: 3 days,
+                gracePeriodRate: MAX_INTEREST_RATE + 1
+            })
+        );
+
+        /* Move to the origination time */
+        vm.warp(_recipeTimestamp(config.variant));
+
+        /* Stage the lender deposits */
+        prepareLenderDeposits(loanTerms, true);
+
+        /* The interest rate model rejects the out of range rate */
+        vm.prank(users.deployer);
+
+        vm.expectRevert(AmortizedInterestRateModel.InvalidOptions.selector);
+
+        router.originate(loanTerms, buildDepositInfos(loanTerms, true), new bytes[](0));
+    }
+
+    /*------------------------------------------------------------------------*/
     /* Test: rate at the maximum on the longest schedule */
     /*------------------------------------------------------------------------*/
 
