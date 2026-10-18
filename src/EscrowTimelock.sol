@@ -53,6 +53,11 @@ contract EscrowTimelock is
      */
     uint256 private constant FIXED_POINT_SCALE = 1e18;
 
+    /**
+     * @notice Max per-second interest rate (1e18-scaled), 100% APR over a 365 day year
+     */
+    uint256 private constant MAX_INTEREST_RATE = 31_709_791_983;
+
     /*------------------------------------------------------------------------*/
     /* Structures */
     /*------------------------------------------------------------------------*/
@@ -347,8 +352,8 @@ contract EscrowTimelock is
         /* Validate deposit does not exist */
         if (_getDepositsStorage().deposits[tokenId].target != address(0)) revert InvalidDeposit();
 
-        /* Validate interest rate is not more than fixed point scale */
-        if (interestRate > FIXED_POINT_SCALE) revert InvalidAmount();
+        /* Validate interest rate is not more than max interest rate */
+        if (interestRate > MAX_INTEREST_RATE) revert InvalidAmount();
 
         /* Create deposit */
         _getDepositsStorage().deposits[tokenId] = Deposit({

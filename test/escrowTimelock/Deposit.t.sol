@@ -215,28 +215,28 @@ contract EscrowTimelockDepositTest is BaseTest {
     /* Test: interest rate boundary */
     /*------------------------------------------------------------------------*/
 
-    function test__Deposit_RevertWhen_InterestRateExceedsFixedPointScale() public {
+    function test__Deposit_RevertWhen_InterestRateExceedsMaximum() public {
         address target = address(loanRouter);
         bytes32 context = keccak256("rate-too-high");
         uint256 amount = 100_000 * 1e18;
 
         vm.startPrank(STAKED_USDAI);
         vm.expectRevert(IEscrowTimelock.InvalidAmount.selector);
-        escrowTimelock.deposit(target, context, USDAI, amount, FIXED_POINT_SCALE + 1);
+        escrowTimelock.deposit(target, context, USDAI, amount, MAX_ESCROW_INTEREST_RATE + 1);
         vm.stopPrank();
     }
 
-    function test__Deposit_AtInterestRateBoundary_ExactlyFixedPointScale() public {
+    function test__Deposit_AtInterestRateBoundary_ExactlyMaximum() public {
         address target = address(loanRouter);
         bytes32 context = keccak256("rate-at-boundary");
         uint256 amount = 100_000 * 1e18;
 
         vm.prank(STAKED_USDAI);
-        escrowTimelock.deposit(target, context, USDAI, amount, FIXED_POINT_SCALE);
+        escrowTimelock.deposit(target, context, USDAI, amount, MAX_ESCROW_INTEREST_RATE);
 
         uint256 tokenId = escrowTimelock.depositTokenId(target, context);
         (,,, uint256 rate_,,) = escrowTimelock.depositInfo(tokenId);
-        assertEq(rate_, FIXED_POINT_SCALE, "Rate should be exactly FIXED_POINT_SCALE");
+        assertEq(rate_, MAX_ESCROW_INTEREST_RATE, "Rate should be exactly the maximum");
         assertEq(escrowTimelock.accrued(), 0, "Accrued is 0 at the deposit instant");
     }
 
