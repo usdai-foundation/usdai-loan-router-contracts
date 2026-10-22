@@ -118,7 +118,7 @@ contract SimpleInterestRateModelTest is BaseTest {
     }
 
     function test__InterestRateModelVersion_Returns() public view {
-        assertEq(model.INTEREST_RATE_MODEL_VERSION(), "2.0");
+        assertEq(model.INTEREST_RATE_MODEL_VERSION(), "2.1");
     }
 
     /*------------------------------------------------------------------------*/
