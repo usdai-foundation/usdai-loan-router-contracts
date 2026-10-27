@@ -615,6 +615,27 @@ contract LoanRouterV2RefinanceTest is RouterFixture {
     /*------------------------------------------------------------------------*/
 
     /**
+     * @notice A borrower who has not paid the current cycle cannot refinance
+     */
+    function test__RevertWhen_CurrentWindowNotRepaid() public {
+        /* Originate a loan and leave the first installment unpaid */
+        loanB = _originateSingleUsdcUnseasoned();
+
+        uint256 balance = _readBalance(loanB);
+
+        /* Keep the tranche flat so only the window gate can reject the refinance */
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = loanB.trancheSpecs[0].amount;
+
+        ILoanRouterV2.LoanTermsV2 memory newTerms = _buildNewTermsMulti(loanB, amounts, RATE_12_PCT, 0);
+
+        /* The router rejects a borrower who is not yet current */
+        vm.prank(users.deployer);
+        vm.expectRevert(abi.encodeWithSelector(ILoanRouterV2.InvalidLoanTerms.selector, "Current Window Not Repaid"));
+        router.refinance(loanB, newTerms, balance);
+    }
+
+    /**
      * @notice Paying the cycle opens the refinance window up to that cycle's deadline
      */
     function test__RefinanceAllowedOnlyBeforeCycleDeadline() public {

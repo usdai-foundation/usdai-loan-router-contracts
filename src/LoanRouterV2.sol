@@ -882,8 +882,7 @@ contract LoanRouterV2 is
         newLoan.status = LoanStatus.Active;
         newLoan.balance = newBalance;
         newLoan.repaymentCount = oldLoan.repaymentCount;
-        newLoan.originationTimestamp =
-            oldLoan.repaymentCount == 0 ? uint64(block.timestamp) : oldLoan.originationTimestamp;
+        newLoan.originationTimestamp = oldLoan.originationTimestamp;
 
         /* Tokenize lender positions without calling onLoanOriginated hook */
         _tokenizeLenderPositions(newLoanTerms, newLoanTermsHash, true);

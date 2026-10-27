@@ -252,9 +252,7 @@ library LoanLogicV2 {
         (bool isCurrentWindowRepaid,) = _repaymentDeadlineStatus(oldLoanTerms, oldLoan, uint64(block.timestamp));
 
         /* Current window must be repaid */
-        if (oldLoan.repaymentCount != 0 && !isCurrentWindowRepaid) {
-            revert ILoanRouterV2.InvalidLoanTerms("Current Window Not Repaid");
-        }
+        if (!isCurrentWindowRepaid) revert ILoanRouterV2.InvalidLoanTerms("Current Window Not Repaid");
 
         /* New loan terms cannot be expired */
         if (newLoanTerms.expiration < block.timestamp) revert ILoanRouterV2.InvalidLoanTerms("Expiration");
@@ -281,11 +279,7 @@ library LoanLogicV2 {
         }
 
         /* Repayment schedule must not change */
-        if (
-            oldLoan.repaymentCount != 0
-                && keccak256(abi.encode(oldLoanTerms.repaymentSpec))
-                    != keccak256(abi.encode(newLoanTerms.repaymentSpec))
-        ) {
+        if (keccak256(abi.encode(oldLoanTerms.repaymentSpec)) != keccak256(abi.encode(newLoanTerms.repaymentSpec))) {
             revert ILoanRouterV2.InvalidLoanTerms("Repayment Spec");
         }
 
