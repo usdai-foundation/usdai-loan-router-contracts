@@ -1,3 +1,8 @@
+* LoanRouterV2 v1.4 - 10/28/2026
+    * Cap tranche rate at 100% APR.
+    * Remove support for legacy loans in `refinance()` API.
+    * Revert on lender hook failure in `refinance()` API.
+
 * EscrowTimelock v1.1 - 10/28/2026
     * Cap deposit rate at 100% APR.
 
