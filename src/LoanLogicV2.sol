@@ -1031,7 +1031,7 @@ library LoanLogicV2 {
     }
 
     /**
-     * @notice Call the refinance hook on every tranche lender that supports it
+     * @notice Call the refinance hook on every tranche lender that supports it. A hook failure reverts the refinance.
      * @param oldLoanTerms Old loan terms
      * @param newLoanTerms New loan terms
      * @param oldLoanTermsHash Old loan terms hash
@@ -1049,9 +1049,12 @@ library LoanLogicV2 {
     ) internal {
         /* Notify each old tranche lender */
         for (uint8 i; i < oldLoanTerms.trancheSpecs.length; i++) {
-            /* Call onLoanRefinanced hook if lender is a contract and implements ILoanRouterV2Hooks interface */
-            if (_supportsHooksInterface(oldLenders[i])) {
-                try ILoanRouterV2Hooks(oldLenders[i]).onLoanRefinanced{gas: HOOK_GAS_LIMIT}(
+            /* Skip lenders without hook support */
+            if (!_supportsHooksInterface(oldLenders[i])) continue;
+
+            /* Call onLoanRefinanced hook, reverting the refinance when it fails */
+            ILoanRouterV2Hooks(oldLenders[i])
+                .onLoanRefinanced(
                     oldLoanTerms,
                     newLoanTerms,
                     oldLoanTermsHash,
@@ -1059,12 +1062,7 @@ library LoanLogicV2 {
                     i,
                     trancheDeltas[i] > 0 ? uint256(trancheDeltas[i]) : 0,
                     trancheDeltas[i] < 0 ? uint256(-trancheDeltas[i]) : 0
-                ) {}
-                catch (bytes memory reason) {
-                    /* Emit hook failed event */
-                    emit HookFailed(string(reason));
-                }
-            }
+                );
         }
     }
 

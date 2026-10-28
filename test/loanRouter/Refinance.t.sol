@@ -4,11 +4,13 @@ pragma solidity 0.8.35;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {RouterFixture} from "../helpers/RouterFixture.sol";
 import {LoanFixtures} from "../helpers/LoanFixtures.sol";
 import {TestERC721} from "../mocks/TestERC721.sol";
+import {LenderHookReverter} from "../mocks/LenderHookReverter.sol";
 
 import {ILoanRouterV2} from "src/interfaces/ILoanRouterV2.sol";
 import {ILoanRouterV2Hooks} from "src/interfaces/ILoanRouterV2Hooks.sol";
@@ -499,9 +501,9 @@ contract LoanRouterV2RefinanceTest is RouterFixture {
     }
 
     /**
-     * @notice A reverting lender hook is caught and does not block the refinance
+     * @notice A reverting lender hook reverts the refinance
      */
-    function test__RefinanceLenderHookRevertDoesNotBlock() public {
+    function test__RevertWhen_LenderHookReverts() public {
         /* Read the outstanding balance without repaying */
         uint256 balance = _readBalance(loanA);
 
@@ -523,14 +525,89 @@ contract LoanRouterV2RefinanceTest is RouterFixture {
             STAKED_USDAI, abi.encodeWithSelector(ILoanRouterV2Hooks.onLoanRefinanced.selector), "hook reverted"
         );
 
-        /* Refinance still succeeds */
+        /* Refinance reverts with the hook revert reason */
         vm.prank(users.deployer);
+        vm.expectRevert(bytes("hook reverted"));
         router.refinance(loanA, newTerms, balance);
+    }
 
-        /* New loan is active despite the reverting hook */
-        (ILoanRouterV2.LoanStatus status,,,) = router.loanState(router.loanTermsHash(newTerms));
+    /**
+     * @notice One reverting lender hook on a two-tranche loan reverts the refinance
+     */
+    function test__RevertWhen_OneOfTwoLenderHooksReverts() public {
+        /* Originate a two-tranche USDai loan and bring it current */
+        loanB = _originateTwoTranche(USDAI);
 
-        assertEq(uint8(status), uint8(ILoanRouterV2.LoanStatus.Active), "new loan not active");
+        uint256 balance = _readBalance(loanB);
+
+        /* Keep both tranches at their notionals so no cash moves */
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = loanB.trancheSpecs[0].amount;
+        amounts[1] = loanB.trancheSpecs[1].amount;
+
+        ILoanRouterV2.LoanTermsV2 memory newTerms = _buildNewTermsMulti(loanB, amounts, RATE_12_PCT, 0);
+
+        /* Make the second lender report support for the hooks interface */
+        vm.mockCall(
+            users.lender2,
+            abi.encodeWithSelector(IERC165.supportsInterface.selector, type(ILoanRouterV2Hooks).interfaceId),
+            abi.encode(true)
+        );
+
+        /* Make the second lender accept its new position on safe mint */
+        vm.mockCall(
+            users.lender2,
+            abi.encodeWithSelector(IERC721Receiver.onERC721Received.selector),
+            abi.encode(IERC721Receiver.onERC721Received.selector)
+        );
+
+        /* Make only the second lender refinance hook revert */
+        vm.mockCallRevert(
+            users.lender2, abi.encodeWithSelector(ILoanRouterV2Hooks.onLoanRefinanced.selector), "hook reverted"
+        );
+
+        /* Refinance reverts with the second lender hook revert reason */
+        vm.prank(users.deployer);
+        vm.expectRevert(bytes("hook reverted"));
+        router.refinance(loanB, newTerms, balance);
+    }
+
+    /**
+     * @notice A LenderHookReverter position owner reverts the refinance with its custom error
+     */
+    function test__RevertWhen_PositionOwnerIsLenderHookReverter() public {
+        /* Originate a two-tranche USDai loan and bring it current */
+        loanB = _originateTwoTranche(USDAI);
+
+        uint256 balance = _readBalance(loanB);
+
+        /* Sum the old tranche notionals */
+        uint256 oldPrincipal = loanB.trancheSpecs[0].amount + loanB.trancheSpecs[1].amount;
+
+        /* Move the removed tranche's position to a reverting hook contract */
+        LenderHookReverter reverter = new LenderHookReverter();
+
+        uint256 removedTokenId = router.loanTokenIds(loanB)[1];
+
+        vm.prank(users.lender2);
+        router.transferFrom(users.lender2, address(reverter), removedTokenId);
+
+        /* Drop tranche 1 and keep tranche 0 at its notional */
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = loanB.trancheSpecs[0].amount;
+
+        ILoanRouterV2.LoanTermsV2 memory newTerms = _buildNewTermsMulti(loanB, amounts, RATE_12_PCT, 0);
+
+        /* The removed tranche is cashed in at the balance ratio, rounded up */
+        uint256 expectedCashIn = Math.mulDiv(loanB.trancheSpecs[1].amount, balance, oldPrincipal, Math.Rounding.Ceil);
+
+        /* Fund and approve the borrower for the cash-in */
+        _fundBorrower(expectedCashIn);
+
+        /* Refinance reverts with the reverter custom error */
+        vm.prank(users.deployer);
+        vm.expectRevert(LenderHookReverter.HookIntentionallyReverted.selector);
+        router.refinance(loanB, newTerms, balance);
     }
 
     /*------------------------------------------------------------------------*/
