@@ -1,3 +1,6 @@
+* ProratedRatioFeeModel v1.0 - 10/28/2026
+    * Initial release.
+
 * AmortizedInterestRateModel v2.1 - 10/28/2026
     * Cap grace period rate at 100% APR.
     * Combine repayment fees into level payment.
