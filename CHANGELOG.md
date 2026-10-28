@@ -1,3 +1,7 @@
+* AmortizedInterestRateModel v2.1 - 10/28/2026
+    * Cap grace period rate at 100% APR.
+    * Combine repayment fees into level payment.
+
 * SimpleInterestRateModel v2.1 - 10/28/2026
     * Cap grace period rate at 100% APR.
 
