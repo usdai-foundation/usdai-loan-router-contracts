@@ -1,3 +1,6 @@
+* EscrowTimelock v1.1 - 10/28/2026
+    * Cap deposit rate at 100% APR.
+
 * LoanScheduleViewer v1.0 - 09/23/2026
     * Initial release.
 
