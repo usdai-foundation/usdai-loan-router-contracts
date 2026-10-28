@@ -1,3 +1,6 @@
+* SimpleInterestRateModel v2.1 - 10/28/2026
+    * Cap grace period rate at 100% APR.
+
 * LoanRouterV2 v1.4 - 10/28/2026
     * Cap tranche rate at 100% APR.
     * Remove support for legacy loans in `refinance()` API.
