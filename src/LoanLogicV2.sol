@@ -201,6 +201,7 @@ library LoanLogicV2 {
         if (loanTerms.interestRateSpec.model == address(0)) {
             revert ILoanRouterV2.InvalidLoanTerms("Interest Rate Model");
         }
+        IInterestRateModelV2(loanTerms.interestRateSpec.model).validateOptions(loanTerms.interestRateSpec.options);
         if (loanTerms.trancheSpecs.length == 0) revert ILoanRouterV2.InvalidLoanTerms("Tranche Specs");
         if (loanTerms.trancheSpecs.length > 32) revert ILoanRouterV2.InvalidLoanTerms("Tranche Specs");
         uint256 principal;
