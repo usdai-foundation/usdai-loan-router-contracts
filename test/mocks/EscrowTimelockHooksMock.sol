@@ -64,6 +64,17 @@ contract EscrowTimelockHooksMock is IEscrowTimelockHooks, IERC165, IERC721Receiv
         lastCall = Call({target: target, context: context, token: token, amount: amount, interest: interest});
     }
 
+    function onEscrowInterestRepaid(
+        address target,
+        bytes32 context,
+        address token,
+        uint256 interest
+    ) external override {
+        if (mode == Mode.Revert) revert("hook reverted");
+        callCount++;
+        lastCall = Call({target: target, context: context, token: token, amount: 0, interest: interest});
+    }
+
     function supportsInterface(
         bytes4 interfaceId
     ) external view override returns (bool) {

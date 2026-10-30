@@ -63,6 +63,14 @@ interface IEscrowTimelock {
     event Canceled(address indexed target, bytes32 indexed context, uint256 amount, uint256 interest);
 
     /**
+     * @notice Emitted when deposit interest is repaid
+     * @param target Target address
+     * @param context Context identifier
+     * @param interest Interest paid to depositor
+     */
+    event InterestRepaid(address indexed target, bytes32 indexed context, uint256 interest);
+
+    /**
      * @notice Emitted when a deposit is withdrawn
      * @param withdrawer Withdrawer address
      * @param context Context identifier
@@ -95,8 +103,8 @@ interface IEscrowTimelock {
     function depositor() external view returns (address);
 
     /**
-     * @notice Get accrued interest
-     * @return Accrued interest
+     * @notice Get unpaid accrued interest
+     * @return Unpaid accrued interest
      */
     function accrued() external view returns (uint256);
 
@@ -125,7 +133,7 @@ interface IEscrowTimelock {
      * @return amount Amount deposited
      * @return interestRate Interest rate
      * @return timestamp Deposit timestamp
-     * @return interest Interest accrued
+     * @return interest Interest owed
      */
     function depositInfo(
         uint256 tokenId
@@ -171,6 +179,24 @@ interface IEscrowTimelock {
         address target,
         bytes32 context
     ) external returns (uint256, uint256);
+
+    /*------------------------------------------------------------------------*/
+    /* Escrow Admin API */
+    /*------------------------------------------------------------------------*/
+
+    /**
+     * @notice Repay interest owed on a deposit
+     * @dev repayInterest() rounds down, cancel() and withdraw() round up
+     * @param target Target address
+     * @param context Context identifier
+     * @param amount Interest amount to repay
+     * @return Interest amount repaid (capped at unpaid accrued interest)
+     */
+    function repayInterest(
+        address target,
+        bytes32 context,
+        uint256 amount
+    ) external returns (uint256);
 
     /*------------------------------------------------------------------------*/
     /* Withdrawer API */

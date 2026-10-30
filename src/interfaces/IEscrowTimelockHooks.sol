@@ -7,6 +7,20 @@ pragma solidity ^0.8.0;
  */
 interface IEscrowTimelockHooks {
     /**
+     * @notice Called when escrow interest is repaid
+     * @param target Target address
+     * @param context Context identifier
+     * @param token Token address
+     * @param interest Interest paid
+     */
+    function onEscrowInterestRepaid(
+        address target,
+        bytes32 context,
+        address token,
+        uint256 interest
+    ) external;
+
+    /**
      * @notice Called when escrow funds are withdrawn
      * @param target Target address
      * @param context Context identifier

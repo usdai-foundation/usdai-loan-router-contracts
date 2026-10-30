@@ -70,6 +70,7 @@ contract EscrowTimelock is
      * @param context Context identifier
      * @param amount Amount
      * @param interestRate Interest rate
+     * @param interestPaid Interest already paid to depositor
      */
     struct Deposit {
         address target;
@@ -77,6 +78,7 @@ contract EscrowTimelock is
         bytes32 context;
         uint256 amount;
         uint256 interestRate;
+        uint256 interestPaid;
     }
 
     /**
@@ -165,6 +167,15 @@ contract EscrowTimelock is
      */
     modifier onlyDepositor() {
         if (msg.sender != _depositor) revert InvalidCaller();
+
+        _;
+    }
+
+    /**
+     * @notice Only escrow admin
+     */
+    modifier onlyEscrowAdmin() {
+        if (msg.sender != _escrowAdmin) revert InvalidCaller();
 
         _;
     }
@@ -312,11 +323,14 @@ contract EscrowTimelock is
         /* Get deposit */
         Deposit memory deposit_ = _getDepositsStorage().deposits[tokenId];
 
-        /* Get interest due */
+        /* Calculate total interest accrued for this deposit */
         uint256 interest = deposit_.amount * deposit_.interestRate * (block.timestamp - deposit_.timestamp);
 
         /* Unscale interest and round up */
         interest = Math.ceilDiv(interest, FIXED_POINT_SCALE);
+
+        /* Subtract unscaled interest already paid */
+        interest -= deposit_.interestPaid;
 
         /* Return deposit information */
         return (deposit_.target, deposit_.context, deposit_.amount, deposit_.interestRate, deposit_.timestamp, interest);
@@ -362,7 +376,8 @@ contract EscrowTimelock is
             context: context,
             amount: amount,
             interestRate: interestRate,
-            timestamp: uint64(block.timestamp)
+            timestamp: uint64(block.timestamp),
+            interestPaid: 0
         });
 
         /* Update total deposits */
@@ -412,12 +427,15 @@ contract EscrowTimelock is
         /* Calculate total interest accrued for this deposit */
         uint256 interest = (deposit_.amount * deposit_.interestRate) * (block.timestamp - deposit_.timestamp);
 
-        /* Remove deposit from accrual */
-        _getAccrualStorage().accrued -= interest;
+        /* Remove unpaid deposit interest from accrual */
+        _getAccrualStorage().accrued -= interest - deposit_.interestPaid * FIXED_POINT_SCALE;
         _getAccrualStorage().rate -= deposit_.amount * deposit_.interestRate;
 
         /* Unscale interest and round up */
         interest = Math.ceilDiv(interest, FIXED_POINT_SCALE);
+
+        /* Subtract unscaled interest already paid */
+        interest -= deposit_.interestPaid;
 
         /* Burn receipt token */
         _burn(tokenId);
@@ -430,6 +448,69 @@ contract EscrowTimelock is
 
         /* Return deposit amount and interest */
         return (deposit_.amount, interest);
+    }
+
+    /*------------------------------------------------------------------------*/
+    /* Escrow Admin API */
+    /*------------------------------------------------------------------------*/
+
+    /**
+     * @inheritdoc IEscrowTimelock
+     */
+    function repayInterest(
+        address target,
+        bytes32 context,
+        uint256 amount
+    )
+        external
+        onlyEscrowAdmin
+        nonZeroAddress(target)
+        nonZeroBytes32(context)
+        nonZeroUint(amount)
+        nonReentrant
+        returns (uint256)
+    {
+        /* Compute token ID */
+        uint256 tokenId = _depositTokenId(target, context);
+
+        /* Get deposit */
+        Deposit storage deposit_ = _getDepositsStorage().deposits[tokenId];
+
+        /* Validate deposit exists */
+        if (deposit_.target == address(0)) revert InvalidDeposit();
+
+        /* Calculate interest accrued for this deposit, rounded down (cancel
+         * and withdraw round up and pay the last wei) */
+        uint256 interest =
+            deposit_.amount * deposit_.interestRate * (block.timestamp - deposit_.timestamp) / FIXED_POINT_SCALE;
+
+        /* Clamp amount to unpaid interest */
+        amount = Math.min(amount, interest - deposit_.interestPaid);
+
+        /* Record interest paid */
+        deposit_.interestPaid += amount;
+
+        /* Accrue interest */
+        _accrue();
+
+        /* Remove paid interest from accrual */
+        _getAccrualStorage().accrued -= amount * FIXED_POINT_SCALE;
+
+        /* Transfer interest from escrow admin to depositor */
+        if (amount > 0) _depositToken.safeTransferFrom(_escrowAdmin, _depositor, amount);
+
+        /* Call onEscrowInterestRepaid hook if depositor supports it */
+        if (
+            _depositor.code.length != 0 && IERC165(_depositor).supportsInterface(type(IEscrowTimelockHooks).interfaceId)
+        ) {
+            IEscrowTimelockHooks(_depositor).onEscrowInterestRepaid(target, context, address(_depositToken), amount);
+        }
+
+        /* Emit InterestRepaid event */
+        emit InterestRepaid(target, context, amount);
+
+        /* Return interest repaid amount */
+        return amount;
     }
 
     /*------------------------------------------------------------------------*/
@@ -471,12 +552,15 @@ contract EscrowTimelock is
         /* Calculate total interest accrued for this deposit */
         uint256 interest = (deposit_.amount * deposit_.interestRate) * (block.timestamp - deposit_.timestamp);
 
-        /* Remove deposit from accrual */
-        _getAccrualStorage().accrued -= interest;
+        /* Remove unpaid deposit interest from accrual */
+        _getAccrualStorage().accrued -= interest - deposit_.interestPaid * FIXED_POINT_SCALE;
         _getAccrualStorage().rate -= deposit_.amount * deposit_.interestRate;
 
         /* Unscale interest and round up */
         interest = Math.ceilDiv(interest, FIXED_POINT_SCALE);
+
+        /* Subtract unscaled interest already paid */
+        interest -= deposit_.interestPaid;
 
         /* Burn deposit receipt NFT */
         _burn(tokenId);
