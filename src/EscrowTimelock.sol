@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 
 import "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
@@ -315,7 +316,7 @@ contract EscrowTimelock is
         uint256 interest = deposit_.amount * deposit_.interestRate * (block.timestamp - deposit_.timestamp);
 
         /* Unscale interest and round up */
-        interest = interest % FIXED_POINT_SCALE == 0 ? interest / FIXED_POINT_SCALE : interest / FIXED_POINT_SCALE + 1;
+        interest = Math.ceilDiv(interest, FIXED_POINT_SCALE);
 
         /* Return deposit information */
         return (deposit_.target, deposit_.context, deposit_.amount, deposit_.interestRate, deposit_.timestamp, interest);
@@ -416,7 +417,7 @@ contract EscrowTimelock is
         _getAccrualStorage().rate -= deposit_.amount * deposit_.interestRate;
 
         /* Unscale interest and round up */
-        interest = interest % FIXED_POINT_SCALE == 0 ? interest / FIXED_POINT_SCALE : interest / FIXED_POINT_SCALE + 1;
+        interest = Math.ceilDiv(interest, FIXED_POINT_SCALE);
 
         /* Burn receipt token */
         _burn(tokenId);
@@ -475,7 +476,7 @@ contract EscrowTimelock is
         _getAccrualStorage().rate -= deposit_.amount * deposit_.interestRate;
 
         /* Unscale interest and round up */
-        interest = interest % FIXED_POINT_SCALE == 0 ? interest / FIXED_POINT_SCALE : interest / FIXED_POINT_SCALE + 1;
+        interest = Math.ceilDiv(interest, FIXED_POINT_SCALE);
 
         /* Burn deposit receipt NFT */
         _burn(tokenId);
