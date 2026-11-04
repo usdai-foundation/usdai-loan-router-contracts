@@ -1,3 +1,6 @@
+* EscrowTimelock v1.2 - 11/04/2026
+    * Add `repayInterest()` API and depositor `onEscrowInterestRepaid()` hook.
+
 * ProratedRatioFeeModel v1.0 - 10/28/2026
     * Initial release.
 
