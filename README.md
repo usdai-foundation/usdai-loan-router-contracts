@@ -5,7 +5,7 @@
 Clone:
 
 ```shell
-$ git clone --recursive https://github.com/metastreet-labs/usdai-loan-router-contracts.git
+$ git clone --recursive https://github.com/usdai-foundation/usdai-loan-router-contracts.git
 ```
 
 Build:
@@ -18,7 +18,6 @@ Test:
 
 ```shell
 $ forge test
-$ FOUNDRY_PROFILE=exhaustive forge test --ffi --match-contract DateTimeLibDifferentialTest
 ```
 
 ## Update Submodules
@@ -30,4 +29,4 @@ $ git submodule update --init --recursive
 
 ## License
 
-USDai Loan Router Contracts are primarily BUSL-1.1 [licensed](LICENSE). Interfaces are MIT licensed.
+USDai Loan Router Contracts are primarily [BUSL-1.1 licensed](LICENSE). Interfaces are MIT licensed.
